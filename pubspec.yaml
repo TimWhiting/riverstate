@@ -1,0 +1,13 @@
+name: riverstate
+description: A riverpod state machine framework
+version: 0.0.1
+homepage: https://github.com/TimWhiting/riverstate
+
+environment:
+  sdk: '>=2.12.0 <3.0.0'
+
+dependencies:
+  riverpod: ^1.0.0-dev.4
+
+dev_dependencies:
+  lints: ^1.0.0
