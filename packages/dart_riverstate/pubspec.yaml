@@ -11,3 +11,6 @@ dependencies:
 
 dev_dependencies:
   lints: ^1.0.0
+  freezed: any
+  freezed_annotation: any
+  build_runner: any

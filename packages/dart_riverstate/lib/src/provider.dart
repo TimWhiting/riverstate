@@ -2,7 +2,7 @@ import 'package:riverpod/riverpod.dart';
 
 typedef Handler<State> = void Function(StateMachine<State>);
 
-class StateMachine<State> extends StateNotifier<State> {
+abstract class StateMachine<State> extends StateNotifier<State> {
   StateMachine(State state) : super(state);
   final Map<Type, Handler<State>> _actionHandlers = {};
   final Map<Type, Handler<State>> _stateHandlers = {};
@@ -16,7 +16,9 @@ class StateMachine<State> extends StateNotifier<State> {
   }
 }
 
-class _StateMachineProvider<SM extends StateMachine<Object?>>
+typedef ActionProvider<T> = StateProvider<T>;
+
+abstract class _StateMachineProvider<SM extends StateMachine<Object?>>
     extends AlwaysAliveProviderBase<SM> {
   _StateMachineProvider(this._create, {required String? name})
       : super(name == null ? null : '$name.StateMachine');
@@ -41,6 +43,8 @@ class _StateMachineProvider<SM extends StateMachine<Object?>>
   @override
   void setupOverride(SetupOverride setup) => throw UnsupportedError(
       'Cannot override StateMachineProvider.stateMachine');
+
+  List<ActionProvider> get actionProviders;
 }
 
 typedef StateMachineProviderRef<SM extends StateMachine, State>
@@ -54,6 +58,9 @@ mixin _StateMachineProviderMixin<SM extends StateMachine<Value>, Value>
   void setupOverride(SetupOverride setup) {
     setup(origin: this, override: this);
     setup(origin: stateMachine, override: stateMachine);
+    for (final action in stateMachine.actionProviders) {
+      setup(origin: action, override: action);
+    }
   }
 
   /// Overrides the behavior of a provider with a value.
