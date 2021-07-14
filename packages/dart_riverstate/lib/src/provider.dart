@@ -1,102 +1,31 @@
 import 'package:riverpod/riverpod.dart';
 
-typedef Handler<State> = void Function(StateMachine<State>);
-
-abstract class StateMachine<State> extends StateNotifier<State> {
-  StateMachine(State state) : super(state);
-  final Map<Type, Handler<State>> _actionHandlers = {};
-  final Map<Type, Handler<State>> _stateHandlers = {};
-  void on<Action>(void Function(StateMachine<State>) handler) {
-    _actionHandlers[Action] = handler;
-  }
-
-  void when<SubState extends State>(
-      void Function(StateMachine<SubState>) handler) {
-    _stateHandlers[SubState] = handler as Handler<State>;
-  }
-}
+typedef Handler<State> = void Function(StateMachineProvider<State>);
 
 typedef ActionProvider<T> = StateProvider<T>;
 
-abstract class _StateMachineProvider<SM extends StateMachine<Object?>>
-    extends AlwaysAliveProviderBase<SM> {
-  _StateMachineProvider(this._create, {required String? name})
-      : super(name == null ? null : '$name.StateMachine');
+typedef StateMachineProviderRef<State> = StateMachineProviderElement<State>;
 
-  final Create<SM, ProviderRefBase> _create;
-
-  @override
-  SM create(ProviderRefBase ref) {
-    final sm = _create(ref);
-    ref.onDispose(sm.dispose);
-    return sm;
-  }
-
-  @override
-  bool recreateShouldNotify(SM previousState, SM newState) {
-    return true;
-  }
-
-  @override
-  ProviderElement<SM> createElement() => ProviderElement(this);
-
-  @override
-  void setupOverride(SetupOverride setup) => throw UnsupportedError(
-      'Cannot override StateMachineProvider.stateMachine');
-
-  List<ActionProvider> get actionProviders;
-}
-
-typedef StateMachineProviderRef<SM extends StateMachine, State>
-    = ProviderRefBase;
-
-mixin _StateMachineProviderMixin<SM extends StateMachine<Value>, Value>
-    on ProviderBase<Value> {
-  ProviderBase<SM> get stateMachine;
-
+abstract class StateMachineProvider<State>
+    extends AlwaysAliveProviderBase<State> {
   @override
   void setupOverride(SetupOverride setup) {
     setup(origin: this, override: this);
-    setup(origin: stateMachine, override: stateMachine);
-    for (final action in stateMachine.actionProviders) {
+    for (final action in actionProviders) {
       setup(origin: action, override: action);
     }
-  }
-
-  /// Overrides the behavior of a provider with a value.
-  ///
-  /// {@macro riverpod.overideWith}
-  Override overrideWithValue(SM value) {
-    return ProviderOverride((setup) {
-      setup(
-        origin: stateMachine,
-        override: StateProvider<SM>((ref) => value),
-      );
-      setup(origin: this, override: this);
-    });
-  }
-}
-
-class StateMachineProvider<SM extends StateMachine<State>, State>
-    extends AlwaysAliveProviderBase<State> with _StateMachineProviderMixin {
-  StateMachineProvider(this._create, {String? name}) : super(name);
-  final Create<SM, StateMachineProviderRef<SM, State>> _create;
-  @override
-  late final AlwaysAliveProviderBase<SM> stateMachine =
-      _StateMachineProvider(_create, name: name);
-
-  @override
-  State create(ProviderElementBase<State> ref) {
-    final notifier = ref.watch(stateMachine);
-
-    void listener(State newState) {
-      ref.state = newState;
+    for (final subState in subStates) {
+      setup(origin: subState, override: subState);
     }
+  }
 
-    final removeListener = notifier.addListener(listener);
-    ref.onDispose(removeListener);
+  StateMachineProvider(this._create, {String? name}) : super(name);
+  final Create<State, StateMachineProviderRef<State>> _create;
 
-    return ref.state;
+  @override
+  State create(StateMachineProviderElement<State> ref) {
+    final value = _create(ref);
+    return value;
   }
 
   @override
@@ -108,14 +37,85 @@ class StateMachineProvider<SM extends StateMachine<State>, State>
   ///
   /// {@macro riverpod.overideWith}
   Override overrideWithProvider(
-    StateNotifierProvider<SM, State> provider,
+    StateMachineProvider<State> provider,
   ) {
     return ProviderOverride((setup) {
-      setup(origin: stateMachine, override: provider.notifier);
       setup(origin: this, override: this);
     });
   }
 
+  List<ActionProvider> get actionProviders;
+  List<StateMachineProvider> get subStates;
+
   @override
-  ProviderElementBase<State> createElement() => ProviderElement(this);
+  ProviderElementBase<State> createElement() =>
+      StateMachineProviderElement<State>(this);
+}
+
+class StateMachineProviderElement<State> extends ProviderElementBase<State>
+    implements ProviderRef<State> {
+  StateMachineProviderElement(this.stateMachineProvider)
+      : super(stateMachineProvider);
+  final StateMachineProvider<State> stateMachineProvider;
+  final Map<Type, StateDispatcher<State, State>> _stateHandlers = {};
+
+  StateDispatcher<State, SubState> when<SubState extends State>() {
+    _stateHandlers[SubState] ??= StateDispatcher<State, SubState>(this);
+    return _stateHandlers[SubState] as StateDispatcher<State, SubState>;
+  }
+
+  void act<T extends Object>(StateProvider<T> action, [T? value]) {
+    if (value != null) {
+      read(action).state = value;
+    } else {
+      // Trigger update anyways
+      read(action).state = read(action).state;
+    }
+  }
+
+  void actN<T extends Object>(StateProvider<T?> action, [T? value]) {
+    read(action).state = value;
+  }
+}
+
+class StateDispatcher<States, SubState> {
+  StateDispatcher(this.ref);
+  final StateMachineProviderRef<States> ref;
+  void on<Event extends Action>(StateProvider<Event> provider,
+      States Function(SubState, Event) transition) {
+    ref.listen<StateController<Event>>(provider, (e) {
+      final event = e.state;
+      if (ref.state is SubState) {
+        if (event.once && event.handled) {
+          return;
+        }
+        ref.state = transition(ref.state as SubState, event);
+        event.handled = true;
+      }
+    });
+  }
+}
+
+class Action {
+  final bool once;
+  bool handled = false;
+  Action({this.once = true});
+}
+
+extension ActionProviderExt<Act extends Action> on StateController<Act> {
+  void act([Act? value]) {
+    if (value != null) {
+      state = value;
+    } else {
+      // Trigger update anyways
+      state = state;
+    }
+  }
+}
+
+extension ActionProviderExtNullable<Act extends Action>
+    on StateController<Act?> {
+  void actN([Act? value]) {
+    state = value;
+  }
 }

@@ -14,3 +14,4 @@ dev_dependencies:
   freezed: any
   freezed_annotation: any
   build_runner: any
+  test: any
